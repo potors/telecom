@@ -1,108 +1,71 @@
+#include <stdio.h>
 #include <freertos/FreeRTOS.h>
 #include <esp_err.h>
-#include <esp_log.h>
-#include <esp_timer.h>
-#include <stdio.h>
 
-// See: https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/peripherals/i2s.html
-// Also: https://esp32.com/viewtopic.php?t=15185
-#include <driver/i2s_std.h>
-#include <driver/gpio.h>
+#include "i2s.h"
+#include "perf.h"
 
-#define PIN_SCK GPIO_NUM_18
+#include "screen.h"
 
-i2s_chan_handle_t i2s(int sample_rate, int ws, int sd) {
-    i2s_chan_handle_t rx;
+#include "matched_filter.h"
 
-    i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0, I2S_ROLE_MASTER);
-    i2s_new_channel(&chan_cfg, NULL, &rx);
-
-    i2s_std_config_t std_cfg = {
-        .clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(sample_rate),
-        .slot_cfg = {
-            .data_bit_width = I2S_DATA_BIT_WIDTH_24BIT,
-            .slot_bit_width = I2S_DATA_BIT_WIDTH_32BIT,
-            .slot_mode = I2S_SLOT_MODE_STEREO,
-            .slot_mask = I2S_STD_SLOT_BOTH,
-            .ws_width = 32,
-            .ws_pol = false,
-            .bit_shift = true,
-            .msb_right = false,
-        },
-        .gpio_cfg = {
-            .mclk = I2S_GPIO_UNUSED,
-            .bclk = PIN_SCK,
-            .ws = ws,
-            .dout = I2S_GPIO_UNUSED,
-            .din = sd,
-            .invert_flags = {
-                .bclk_inv = false,
-                .mclk_inv = false,
-                .ws_inv = false,
-            },
-        },
-    };
-
-    ESP_ERROR_CHECK(i2s_channel_init_std_mode(rx, &std_cfg));
-
-    return rx;
-}
-
-#define WS GPIO_NUM_4
-#define SD GPIO_NUM_2
-
-#define BUFFER_SIZE 1024
 #define SAMPLE_RATE 48000
 
+#define BUFFER_LEN 1024
+#define BUFFER_SIZE sizeof(int32_t) * BUFFER_LEN
+
+#if defined CONFIG_IDF_TARGET_ESP32
+    #define MIC1_WS GPIO_NUM_4
+    #define MIC1_SD GPIO_NUM_2
+    #define MIC1_SCK "todo"
+#endif
+
+#if defined CONFIG_IDF_TARGET_ESP32C3
+    #define MIC1_WS GPIO_NUM_1
+    #define MIC1_SD GPIO_NUM_0
+    #define MIC1_SCK GPIO_NUM_8
+
+    #define LCD_SCK GPIO_NUM_2
+    #define LCD_MOSI GPIO_NUM_6
+    #define LCD_DC GPIO_NUM_10
+    #define LCD_RESET GPIO_NUM_4
+    #define LCD_CS GPIO_NUM_3
+#endif
+
+
 void app_main() {
-    i2s_chan_handle_t rx = i2s(SAMPLE_RATE, WS, SD);
-    ESP_ERROR_CHECK(i2s_channel_enable(rx));
+    screen(LCD_SCK, LCD_MOSI, -1, 320, 240, LCD_DC, LCD_CS, 20 * 1000 * 1000, LCD_RESET);
+    i2s_chan_handle_t rx = i2s(SAMPLE_RATE, MIC1_WS, MIC1_SD, MIC1_SCK);
 
-    static int buffer[BUFFER_SIZE];
+    screen_fill(255, 0, 0);
 
-    unsigned int reads = 0;
-    esp_err_t status;
+    static int32_t buffer[BUFFER_LEN];
 
-    while (1) {
-        static int CHUNKS = 1;
-        float start = (float) esp_timer_get_time() / (1000 * 1000);
-        for (int i = 0; i < CHUNKS; i++) {
-            status = i2s_channel_read(rx, &buffer, BUFFER_SIZE * sizeof(int), &reads, portMAX_DELAY);
-            if (status != ESP_OK) {
-                ESP_LOGE("wut", "read error: %d", status);
-                continue;
-            }
-        }
-        float time = (float) esp_timer_get_time() / (1000 * 1000) - start;
+    printf("i'm alive\n\n\n\n\n\n\n\n");
 
-        float secs_per_chunk = time / CHUNKS;
-        float secs_per_read = secs_per_chunk / reads;
+    while (true) {
+        printf("\x1b[6A");
 
-        printf("Read Tracing:\n");
-        printf("\t%d chunks\n", CHUNKS);
-        printf("\t%u samples\n", BUFFER_SIZE);
-        printf("\t%fs total\n", time);
-        printf("\t%fs per chunk\n", secs_per_chunk);
-        printf("\t%fms per chunk\n", secs_per_chunk * 1000);
-        printf("\t%fµs per chunk\n", secs_per_chunk * 1000 * 1000);
-        printf("\t%f chunks per sec\n", 1 / secs_per_chunk);
-        printf("\t%fs per read\n", secs_per_read);
-        printf("\t%fms per read\n", secs_per_read * 1000);
-        printf("\t%fµs per read\n", secs_per_read * 1000 * 1000);
-        printf("\t%f reads per sec\n", 1 / secs_per_read);
+        tic();
+        ESP_ERROR_CHECK(i2s_channel_read(rx, buffer, sizeof(buffer), NULL, portMAX_DELAY));
+        uint64_t took = tac_us();
 
-        // start = (float) esp_timer_get_time() / (1000 * 1000);
-        // for (int i = 0; i < BUFFER_SIZE / 2; i++) {
-        //     printf("buffer_l[%d/%d]: %d\n", i, BUFFER_SIZE / 2, buffer[i * 2]);
-        // }
-        //
-        // for (int i = 0; i < BUFFER_SIZE / 2; i++) {
-        //     printf("buffer_r[%d/%d]: %d\n", i, BUFFER_SIZE / 2, buffer[i * 2 + 1]);
-        // }
-        //
-        // time = (float) esp_timer_get_time() / (1000 * 1000) - start;
-        // printf("printing all values took %fs\n", time);
+        printf("read took %lluµs (%lluµs per side) [buffer of %u elements - %u per side]\n", took, took / 2, BUFFER_LEN, BUFFER_LEN / 2);
+        printf("\tran with %lluHz of sampling rate\n", took / BUFFER_SIZE * 2);
 
-        // vTaskDelay(1000 / portTICK_PERIOD_MS);
+        ccmax_t matches = matched_filter_mixed_buffer(buffer, BUFFER_LEN / 2);
+        printf("matched filter results\n");
+        printf("\tleft mic: %f\n", matches.a);
+        printf("\tright mic: %f\n", matches.b);
+
+        static float at_max = -999;
+        static float at_min = 999;
+        at_max = max(at_max, matches.a);
+        at_min = min(at_min, matches.a);
+
+        printf("atmin: %f\t\tatmax: %f\n", at_min, at_max);
+
+        vTaskDelay(1);
+        // vTaskDelay(pdMS_TO_TICKS(1000));
     }
 }
