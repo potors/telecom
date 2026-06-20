@@ -1,8 +1,9 @@
 #pragma once
 
-#include "esp_lcd_io_spi.h"
-#include "esp_lcd_panel_ops.h"
-#include "esp_lcd_ili9341.h"
+#include <string.h>
+#include <esp_lcd_io_spi.h>
+#include <esp_lcd_panel_ops.h>
+#include <esp_lcd_ili9341.h>
 
 typedef struct {
     int width;
@@ -66,41 +67,47 @@ static void screen(
     ESP_ERROR_CHECK(esp_lcd_panel_reset(panel_handle));
     ESP_ERROR_CHECK(esp_lcd_panel_init(panel_handle));
 
-    ESP_ERROR_CHECK(esp_lcd_panel_invert_color(panel_handle, false));
+    ESP_ERROR_CHECK(esp_lcd_panel_swap_xy(panel_handle, false));
+    ESP_ERROR_CHECK(esp_lcd_panel_invert_color(panel_handle, true));
     ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(panel_handle, true));
 }
 
 void screen_fill(char r, char g, char b) {
     uint16_t color = 0;
 
-    color |= 0b11111 * (int) (r / 255.0f);
+    color |= (char) (0b11111 * (r / 255.0f));
     color <<= 5;
 
-    color |= 0b111111 * (int) (g / 255.0f);
+    color |= (char) (0b111111 * (g / 255.0f));
     color <<= 6;
 
-    color |= 0b11111 * (int) (b / 255.0f);
+    color |= (char) (0b11111 * (b / 255.0f));
 
+    printf("Color: rgb(%d %d %d) -> 0x%X\n", (int) r, (int) g, (int) b, color);
+
+    // uint16_t* row = heap_caps_malloc(_screen.stride, MALLOC_CAP_DMA);
     uint16_t* buffer = heap_caps_malloc(_screen.stride * _screen.height, MALLOC_CAP_DMA);
-    for (int i = 0; i < _screen.width * _screen.height; i++) {
-        buffer[i] = color;
-    }
 
-    ESP_ERROR_CHECK(esp_lcd_panel_draw_bitmap(_screen.panel_handle, 0, 0, _screen.width, _screen.height, buffer));
+    // for (int x = 0; x < _screen.width; x++) {
+    //     row[x] = color;
+    // }
+
+    memset(buffer, color, _screen.stride * _screen.height);
+
+    // for (int y = 0; y < _screen.height; y++) {
+    //     esp_lcd_panel_draw_bitmap(
+    //         _screen.panel_handle,
+    //         0, y,
+    //         _screen.width, y + 1,
+    //         row
+    //     );
+    // }
+
+    esp_lcd_panel_draw_bitmap(
+        _screen.panel_handle,
+        0, 0, _screen.width, _screen.height,
+        buffer);
+
+    // free(row);
+    free(buffer);
 }
-
-// void lcd_fill_solid_color(esp_lcd_panel_handle_t panel_handle, uint16_t color) {
-//     // Allocate 1 pixel in DMA-capable memory
-//     uint16_t *dma_color_buffer = heap_caps_malloc(sizeof(uint16_t), MALLOC_CAP_DMA);
-//     if (dma_color_buffer == NULL) {
-//         return; // Handle memory allocation failure
-//     }
-//
-//     *dma_color_buffer = color;
-//
-//     // Flush to the entire screen. esp_lcd will handle hardware DMA repeating.
-//     esp_lcd_panel_draw_bitmap(panel_handle, 0, 0, LCD_H_RES, LCD_V_RES, dma_color_buffer);
-//
-//     // Note: Do not free dma_color_buffer immediately if using async DMA.
-//     // Free it when the 'on_color_trans_done' callback triggers.
-// }
