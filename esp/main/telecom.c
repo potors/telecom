@@ -58,33 +58,10 @@ void app_main() {
 
     lcd_vertical(&lcd, true);
 
-    lcd_fill(&lcd, LCD_WHITE);
+    lcd_fill(&lcd, LCD_BLACK);
 
-    lcd_bmp_t bmp = lcd_bmp_new(lcd.width, lcd.height);
     while (true) {
-        for (int y = 0; y < bmp.height; y++) {
-            float v = 1.0f - (float) y / (bmp.height - 1);
-
-            for (int x = 0; x < bmp.width; x++) {
-                float h = 360.0f * (float) x / (bmp.width - 1);
-
-                bmp.data[y * bmp.width + x] = lcd_hsv(h, 1.0f, v);
-            }
-        }
-
-        lcd_bmp(&lcd, bmp, (lcd_pos_t) { 0, 0 });
-
-        for (int y = 0; y < bmp.height; y++) {
-            float l = 1.0f - (float) y / (bmp.height - 1);
-
-            for (int x = 0; x < bmp.width; x++) {
-                float h = 360.0f * (float) x / (bmp.width - 1);
-
-                bmp.data[y * bmp.width + x] = lcd_hsl(h, 1.0f, l);
-            }
-        }
-
-        lcd_bmp(&lcd, bmp, (lcd_pos_t) { 0, 0 });
+        vTaskDelay(1);
     }
 
     // screen(LCD_SCK, LCD_MOSI, -1, 320, 240, LCD_DC, LCD_CS, 20 * 1000 * 1000, LCD_RESET);

@@ -116,3 +116,29 @@ void lcd_rect(lcd_t* lcd, lcd_rect_t rect, lcd_color_t col);
 // void lcd_circ(lcd_t* lcd, lcd_circ_t circ, lcd_color_t col);
 
 // void lcd_text(lcd_t* lcd, const char* text, int size, lcd_pos_t pos, lcd_color_t col);
+
+// TODO: virtual buffer to enable forced pixelization
+//
+// This approach is better for direct control because it
+// reduces the memory needed to store the entire buffer
+// and also allow some C QoL buffer manipulation features.
+//
+// A potential implementation is to render each line alone,
+// just like fill is doing, and map the colors to row buffer.
+//
+// #define CHUNK 4 // 320x240 -> 80x60 (4px/cell)
+// for (int y = 0; y < bmp.height / CHUNK; y++) {
+//     float v = 1.0f - (float) y * CHUNK / (bmp.height - 1);
+//
+//     for (int x = 0; x < bmp.width / CHUNK; x++) {
+//         float h = 360.0f * (float) x * CHUNK / (bmp.width - 1);
+//
+//         lcd_color_t color = lcd_hsv(h, 1.0f, v);
+//
+//         for (int i = 0; i < CHUNK; i++) {
+//             for (int j = 0; j < CHUNK; j++) {
+//                 bmp.data[(y * CHUNK + i) * bmp.width + (x * CHUNK + j)] = color;
+//             }
+//         }
+//     }
+// }
