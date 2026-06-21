@@ -2,18 +2,19 @@
 #include <freertos/FreeRTOS.h>
 #include <esp_err.h>
 #include <esp_random.h>
+#include <esp_timer.h>
+#include <esp_heap_caps.h>
 
-#include "i2s.h"
-#include "perf.h"
+// #include "i2s.h"
+// #include "perf.h"
 
-#include "screen.h"
+#include "lcd.h"
 
-#include "matched_filter.h"
+// #include "matched_filter.h"
 
 #define SAMPLE_RATE 48000
 
-#define BUFFER_LEN 1024
-#define BUFFER_SIZE sizeof(int32_t) * BUFFER_LEN
+#define BUFFER_LEN 8192
 
 #if defined CONFIG_IDF_TARGET_ESP32
     #define MIC1_WS GPIO_NUM_4
@@ -42,44 +43,86 @@
     #define LCD_CS GPIO_NUM_21
 #endif
 
+void print_free_heap() {
+    printf("free heap: %.02fkB\n", heap_caps_get_free_size(MALLOC_CAP_DEFAULT) / 1024.0f);
+}
 
 void app_main() {
-    screen(LCD_SCK, LCD_MOSI, -1, 320, 240, LCD_DC, LCD_CS, 20 * 1000 * 1000, LCD_RESET);
-    i2s_chan_handle_t rx = i2s(SAMPLE_RATE, MIC1_WS, MIC1_SD, MIC1_SCK);
+    lcd_t lcd = lcd_init(320, 240, (lcd_pins_t) {
+        .cs = LCD_CS,
+        .reset = LCD_RESET,
+        .dc = LCD_DC,
+        .mosi = LCD_MOSI,
+        .sck = LCD_SCK,
+    });
 
-    static int32_t buffer[BUFFER_LEN];
+    lcd_vertical(&lcd, true);
 
-    printf("i'm alive\n\n\n\n\n\n\n\n");
+    lcd_fill(&lcd, LCD_WHITE);
 
+    lcd_bmp_t bmp = lcd_bmp_new(lcd.width, lcd.height);
     while (true) {
-        uint32_t r = esp_random() % 255;
-        uint32_t g = esp_random() % 255;
-        uint32_t b = esp_random() % 255;
+        for (int y = 0; y < bmp.height; y++) {
+            float v = 1.0f - (float) y / (bmp.height - 1);
 
-        screen_fill(r, g, b);
+            for (int x = 0; x < bmp.width; x++) {
+                float h = 360.0f * (float) x / (bmp.width - 1);
 
-        printf("\x1b[7A");
+                bmp.data[y * bmp.width + x] = lcd_hsv(h, 1.0f, v);
+            }
+        }
 
-        tic();
-        ESP_ERROR_CHECK(i2s_channel_read(rx, buffer, sizeof(buffer), NULL, portMAX_DELAY));
-        uint64_t took = tac_us();
+        lcd_bmp(&lcd, bmp, (lcd_pos_t) { 0, 0 });
 
-        printf("read took %lluµs (%lluµs per side) [buffer of %u elements - %u per side]\n", took, took / 2, BUFFER_LEN, BUFFER_LEN / 2);
-        printf("\tran with %lluHz of sampling rate\n", took / BUFFER_SIZE * 2);
+        for (int y = 0; y < bmp.height; y++) {
+            float l = 1.0f - (float) y / (bmp.height - 1);
 
-        ccmax_t matches = matched_filter_mixed_buffer(buffer, BUFFER_LEN / 2);
-        printf("matched filter results\n");
-        printf("\tleft mic: %f\n", matches.a);
-        printf("\tright mic: %f\n", matches.b);
+            for (int x = 0; x < bmp.width; x++) {
+                float h = 360.0f * (float) x / (bmp.width - 1);
 
-        static float at_max = -999;
-        static float at_min = 999;
-        at_max = max(at_max, matches.a);
-        at_min = min(at_min, matches.a);
+                bmp.data[y * bmp.width + x] = lcd_hsl(h, 1.0f, l);
+            }
+        }
 
-        printf("atmin: %f\t\tatmax: %f\n", at_min, at_max);
-
-        vTaskDelay(1);
-        // vTaskDelay(pdMS_TO_TICKS(1000));
+        lcd_bmp(&lcd, bmp, (lcd_pos_t) { 0, 0 });
     }
+
+    // screen(LCD_SCK, LCD_MOSI, -1, 320, 240, LCD_DC, LCD_CS, 20 * 1000 * 1000, LCD_RESET);
+    // i2s_chan_handle_t rx = i2s(SAMPLE_RATE, MIC1_WS, MIC1_SD, MIC1_SCK);
+    //
+    // static int32_t buffer[BUFFER_LEN];
+    //
+    // printf("i'm alive\n\n\n\n\n\n\n\n");
+    //
+    // while (true) {
+    //     uint32_t r = esp_random() % 255;
+    //     uint32_t g = esp_random() % 255;
+    //     uint32_t b = esp_random() % 255;
+    //
+    //     screen_fill(r, g, b);
+    //
+    //     printf("\x1b[7A");
+    //
+    //     tic();
+    //     ESP_ERROR_CHECK(i2s_channel_read(rx, buffer, sizeof(buffer), NULL, portMAX_DELAY));
+    //     uint64_t took = tac_us();
+    //
+    //     printf("read took %lluµs (%lluµs per side) [buffer of %u elements - %u per side]\n", took, took / 2, BUFFER_LEN, BUFFER_LEN / 2);
+    //     printf("\tran with %lluHz of sampling rate\n", took / BUFFER_SIZE * 2);
+    //
+    //     ccmax_t matches = matched_filter_mixed_buffer(buffer, BUFFER_LEN / 2);
+    //     printf("matched filter results\n");
+    //     printf("\tleft mic: %f\n", matches.a);
+    //     printf("\tright mic: %f\n", matches.b);
+    //
+    //     static float at_max = -999;
+    //     static float at_min = 999;
+    //     at_max = max(at_max, matches.a);
+    //     at_min = min(at_min, matches.a);
+    //
+    //     printf("atmin: %f\t\tatmax: %f\n", at_min, at_max);
+    //
+    //     vTaskDelay(1);
+    //     // vTaskDelay(pdMS_TO_TICKS(1000));
+    // }
 }
