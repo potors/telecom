@@ -8,8 +8,8 @@
 
 #define TAG "lcd"
 
-lcd_t lcd_init(int width, int height, lcd_pins_t pins) {
-    ESP_LOGI(TAG, "initializing LCD screen [%dx%d]", width, height);
+lcd_t lcd_init(int width, int height, lcd_opts_t opts, lcd_pins_t pins) {
+    ESP_LOGI(TAG, "initializing lcd screen [%dx%d]", width, height);
 
     int color = sizeof(uint16_t);
     ESP_LOGI(TAG, "using colors of 16 bits (R5G6B5)");
@@ -36,7 +36,7 @@ lcd_t lcd_init(int width, int height, lcd_pins_t pins) {
         .spi_mode = 0,
         .trans_queue_depth = 10,
     };
-    ESP_LOGI(TAG, "using %dMHz SPI clock speed", io_config.pclk_hz / 1000 / 1000);
+    ESP_LOGI(TAG, "using %dMHz spi clock speed", io_config.pclk_hz / 1000 / 1000);
 
     ESP_LOGI(TAG, "initializing 'lcd_panel_io' using pins %d (DC) and %d (CS)", pins.dc, pins.cs);
     ESP_ERROR_CHECK(esp_lcd_new_panel_io_spi(SPI2_HOST, &io_config, &io));
@@ -52,14 +52,6 @@ lcd_t lcd_init(int width, int height, lcd_pins_t pins) {
 
     ESP_ERROR_CHECK(esp_lcd_panel_reset(panel));
     ESP_ERROR_CHECK(esp_lcd_panel_init(panel));
-
-    lcd_opts_t opts = {
-        .on = true,
-        .vertical = false,
-        .inverted = false,
-        .mirror_x = false,
-        .mirror_y = false,
-    };
 
     ESP_LOGI(TAG, "configuring display with these options:");
 
@@ -80,11 +72,10 @@ lcd_t lcd_init(int width, int height, lcd_pins_t pins) {
         .width = width,
         .height = height,
 
-        .opts = opts,
-
         .io = io,
         .panel = panel,
 
+        .opts = opts,
         .pins = pins,
     };
 }

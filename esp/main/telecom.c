@@ -1,20 +1,23 @@
 #include <stdio.h>
+#include <math.h>
 #include <freertos/FreeRTOS.h>
+#include <esp_log.h>
 #include <esp_err.h>
-#include <esp_random.h>
 #include <esp_timer.h>
+#include <esp_random.h>
+#include <esp_task_wdt.h>
 #include <esp_heap_caps.h>
 
-// #include "i2s.h"
-// #include "perf.h"
-
+#include "i2s.h"
 #include "lcd.h"
+#include "snd.h"
 
-// #include "matched_filter.h"
-
-#define SAMPLE_RATE 48000
-
-#define BUFFER_LEN 8192
+#define PROFILE(CALL) do { \
+    uint64_t start = esp_timer_get_time(); \
+    CALL; \
+    ESP_LOGD("profiler", "'%s' took %.03fms", #CALL, \
+        (esp_timer_get_time() - start) / 1000.0f); \
+} while (false);
 
 #if defined CONFIG_IDF_TARGET_ESP32
     #define MIC1_WS GPIO_NUM_4
@@ -43,12 +46,23 @@
     #define LCD_CS GPIO_NUM_21
 #endif
 
-void print_free_heap() {
-    printf("free heap: %.02fkB\n", heap_caps_get_free_size(MALLOC_CAP_DEFAULT) / 1024.0f);
+#define SAMPLE_RATE (48000 * 2)
+#define SAMPLES (1024 * 1)
+
+float iir(float x, float last) {
+    #define a 0.3f
+
+    // y[n] = (alpha * x[n]) + ((1 - alpha) * y[n-1])
+    return (a * x) + ((1.0f - a) * last);
+
+    #undef a
 }
 
 void app_main() {
-    lcd_t lcd = lcd_init(320, 240, (lcd_pins_t) {
+    lcd_t lcd = lcd_init(320, 240, (lcd_opts_t) {
+        .on = false,
+        .vertical = true,
+    }, (lcd_pins_t) {
         .cs = LCD_CS,
         .reset = LCD_RESET,
         .dc = LCD_DC,
@@ -56,50 +70,48 @@ void app_main() {
         .sck = LCD_SCK,
     });
 
-    lcd_vertical(&lcd, true);
+    lcd_fill(&lcd, LCD_WHITE);
 
-    lcd_fill(&lcd, LCD_BLACK);
+    i2s_t mic = i2s_init(SAMPLE_RATE, (i2s_opts_t) {
+        .bits = 24,
+        .bytes = sizeof(uint32_t),
+        .sides = I2S_BOTH,
+        .stereo = true,
+        .shift = true,
+    }, (i2s_pins_t) {
+        .ws = MIC1_WS,
+        .sd = MIC1_SD,
+        .sck = MIC1_SCK,
+    });
+
+    static int32_t buffer[SAMPLES * 2];
 
     while (true) {
-        vTaskDelay(1);
-    }
+        PROFILE(i2s_buffer(&mic, buffer, sizeof(buffer) / sizeof(*buffer)));
 
-    // screen(LCD_SCK, LCD_MOSI, -1, 320, 240, LCD_DC, LCD_CS, 20 * 1000 * 1000, LCD_RESET);
-    // i2s_chan_handle_t rx = i2s(SAMPLE_RATE, MIC1_WS, MIC1_SD, MIC1_SCK);
-    //
-    // static int32_t buffer[BUFFER_LEN];
-    //
-    // printf("i'm alive\n\n\n\n\n\n\n\n");
-    //
-    // while (true) {
-    //     uint32_t r = esp_random() % 255;
-    //     uint32_t g = esp_random() % 255;
-    //     uint32_t b = esp_random() % 255;
-    //
-    //     screen_fill(r, g, b);
-    //
-    //     printf("\x1b[7A");
-    //
-    //     tic();
-    //     ESP_ERROR_CHECK(i2s_channel_read(rx, buffer, sizeof(buffer), NULL, portMAX_DELAY));
-    //     uint64_t took = tac_us();
-    //
-    //     printf("read took %lluµs (%lluµs per side) [buffer of %u elements - %u per side]\n", took, took / 2, BUFFER_LEN, BUFFER_LEN / 2);
-    //     printf("\tran with %lluHz of sampling rate\n", took / BUFFER_SIZE * 2);
-    //
-    //     ccmax_t matches = matched_filter_mixed_buffer(buffer, BUFFER_LEN / 2);
-    //     printf("matched filter results\n");
-    //     printf("\tleft mic: %f\n", matches.a);
-    //     printf("\tright mic: %f\n", matches.b);
-    //
-    //     static float at_max = -999;
-    //     static float at_min = 999;
-    //     at_max = max(at_max, matches.a);
-    //     at_min = min(at_min, matches.a);
-    //
-    //     printf("atmin: %f\t\tatmax: %f\n", at_min, at_max);
-    //
-    //     vTaskDelay(1);
-    //     // vTaskDelay(pdMS_TO_TICKS(1000));
-    // }
+        static float left[SAMPLES];
+        static float right[SAMPLES];
+
+        for (int i = 0; i < SAMPLES * 2; i += 2) {
+            left[i] = buffer[i] / dBFS;
+            right[i] = buffer[i + 1] / dBFS;
+        }
+
+        static float mean = 0.0f;
+        float min = 1e12;
+        float max = -1e12;
+
+        float match = matched_filter(left, right, SAMPLES);
+
+        mean = iir(match, mean);
+
+        for (int i = 0; i < SAMPLES; i++) {
+            min = fmin(min, left[i]);
+            max = fmax(max, left[i]);
+        }
+
+        printf("match: %.03f, mean: %.03f, min: %.03f, max: %.03f\n\x1b[F", match, mean, min, max);
+
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
 }

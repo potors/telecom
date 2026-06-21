@@ -1,7 +1,5 @@
 #pragma once
 
-#include <string.h>
-#include <esp_log.h>
 #include <esp_lcd_io_spi.h>
 
 typedef struct lcd_pins_t {
@@ -24,15 +22,14 @@ typedef struct lcd_t {
     uint16_t width;
     uint16_t height;
 
-    lcd_opts_t opts;
-
     esp_lcd_panel_io_handle_t io;
     esp_lcd_panel_handle_t panel;
 
+    lcd_opts_t opts;
     lcd_pins_t pins;
 } lcd_t;
 
-lcd_t lcd_init(int width, int height, lcd_pins_t pins);
+lcd_t lcd_init(int width, int height, lcd_opts_t opts, lcd_pins_t pins);
 
 void lcd_power(lcd_t* lcd, bool state);
 void lcd_power_toggle(lcd_t* lcd);
