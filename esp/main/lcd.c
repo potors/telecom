@@ -60,6 +60,11 @@ lcd_t lcd_init(int width, int height, lcd_opts_t opts, lcd_pins_t pins) {
 
     ESP_LOGI(TAG, "  vertical = %s", opts.vertical ? "yes" : "no");
     ESP_ERROR_CHECK(esp_lcd_panel_swap_xy(panel, opts.vertical));
+    if (opts.vertical) {
+        uint16_t temp = width;
+        width = height;
+        height = temp;
+    }
 
     ESP_LOGI(TAG, "  inverted = %s", opts.inverted ? "yes" : "no");
     ESP_ERROR_CHECK(esp_lcd_panel_invert_color(panel, opts.inverted));
