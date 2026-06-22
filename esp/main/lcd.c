@@ -55,8 +55,8 @@ lcd_t lcd_init(int width, int height, lcd_opts_t opts, lcd_pins_t pins) {
 
     ESP_LOGI(TAG, "configuring display with these options:");
 
-    ESP_LOGI(TAG, "  on       = %s", opts.on ? "yes" : "no");
-    ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(panel, opts.on));
+    ESP_LOGI(TAG, "  disabled = %s", opts.disabled ? "yes" : "no");
+    ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(panel, !opts.disabled));
 
     ESP_LOGI(TAG, "  vertical = %s", opts.vertical ? "yes" : "no");
     ESP_ERROR_CHECK(esp_lcd_panel_swap_xy(panel, opts.vertical));
@@ -86,7 +86,7 @@ lcd_t lcd_init(int width, int height, lcd_opts_t opts, lcd_pins_t pins) {
 }
 
 void lcd_power(lcd_t* lcd, bool state) {
-    if (lcd->opts.on == state) {
+    if (!lcd->opts.disabled == state) {
         ESP_LOGW(TAG, "lcd is already powered %s",
             state ? "on" : "off");
 
@@ -99,13 +99,13 @@ void lcd_power(lcd_t* lcd, bool state) {
     ESP_ERROR_CHECK(
         esp_lcd_panel_disp_on_off(
             lcd->panel,
-            (lcd->opts.on = state)
+            !(lcd->opts.disabled = !state)
         )
     );
 }
 
 void lcd_power_toggle(lcd_t* lcd) {
-    lcd_power(lcd, !lcd->opts.on);
+    lcd_power(lcd, !lcd->opts.disabled);
 }
 
 void lcd_vertical(lcd_t* lcd, bool state) {

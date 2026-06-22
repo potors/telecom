@@ -11,7 +11,7 @@ typedef struct lcd_pins_t {
 } lcd_pins_t;
 
 typedef struct lcd_opts_t {
-    bool on       : 1;
+    bool disabled : 1;
     bool vertical : 1;
     bool inverted : 1;
     bool mirror_x : 1;
