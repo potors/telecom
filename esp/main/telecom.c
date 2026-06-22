@@ -1,12 +1,12 @@
 #include <stdio.h>
 #include <math.h>
-#include <freertos/FreeRTOS.h>
 #include <esp_log.h>
 #include <esp_err.h>
 #include <esp_timer.h>
 #include <esp_random.h>
 #include <esp_task_wdt.h>
 #include <esp_heap_caps.h>
+#include <freertos/FreeRTOS.h>
 
 #include "i2s.h"
 #include "lcd.h"
@@ -49,18 +49,8 @@
 #define SAMPLE_RATE (48000 * 2)
 #define SAMPLES (1024 * 1)
 
-float iir(float x, float last) {
-    #define a 0.3f
-
-    // y[n] = (alpha * x[n]) + ((1 - alpha) * y[n-1])
-    return (a * x) + ((1.0f - a) * last);
-
-    #undef a
-}
-
 void app_main() {
     lcd_t lcd = lcd_init(320, 240, (lcd_opts_t) {
-        .on = false,
         .vertical = true,
     }, (lcd_pins_t) {
         .cs = LCD_CS,
@@ -70,7 +60,7 @@ void app_main() {
         .sck = LCD_SCK,
     });
 
-    lcd_fill(&lcd, LCD_WHITE);
+    lcd_fill(&lcd, LCD_BLACK);
 
     i2s_t mic = i2s_init(SAMPLE_RATE, (i2s_opts_t) {
         .bits = 24,
@@ -88,30 +78,5 @@ void app_main() {
 
     while (true) {
         PROFILE(i2s_buffer(&mic, buffer, sizeof(buffer) / sizeof(*buffer)));
-
-        static float left[SAMPLES];
-        static float right[SAMPLES];
-
-        for (int i = 0; i < SAMPLES * 2; i += 2) {
-            left[i] = buffer[i] / dBFS;
-            right[i] = buffer[i + 1] / dBFS;
-        }
-
-        static float mean = 0.0f;
-        float min = 1e12;
-        float max = -1e12;
-
-        float match = matched_filter(left, right, SAMPLES);
-
-        mean = iir(match, mean);
-
-        for (int i = 0; i < SAMPLES; i++) {
-            min = fmin(min, left[i]);
-            max = fmax(max, left[i]);
-        }
-
-        printf("match: %.03f, mean: %.03f, min: %.03f, max: %.03f\n\x1b[F", match, mean, min, max);
-
-        vTaskDelay(pdMS_TO_TICKS(10));
     }
 }
