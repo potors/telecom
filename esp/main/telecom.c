@@ -12,12 +12,12 @@
 #include "lcd.h"
 #include "snd.h"
 
-#define PROFILE(CALL) do { \
+#define PROFILE(MSG, CALL) do { \
     uint64_t start = esp_timer_get_time(); \
     CALL; \
-    ESP_LOGD("profiler", "'%s' took %.03fms", #CALL, \
+    ESP_LOGI("profiler", "%s [ln. %d] took %.03fms", MSG, __LINE__, \
         (esp_timer_get_time() - start) / 1000.0f); \
-} while (false);
+} while (false)
 
 #if defined CONFIG_IDF_TARGET_ESP32
     #define MIC1_WS GPIO_NUM_4
@@ -47,7 +47,7 @@
 #endif
 
 #define SAMPLE_RATE (48000 * 2)
-#define SAMPLES (1024 * 1)
+#define SAMPLES (1024 * 4)
 
 void app_main() {
     lcd_t lcd = lcd_init(320, 240, (lcd_opts_t) {
@@ -74,9 +74,35 @@ void app_main() {
         .sck = MIC1_SCK,
     });
 
-    static int32_t buffer[SAMPLES * 2];
+    #define BATCHES 12
+    int32_t* buffer = malloc(SAMPLES * 2 * mic.opts.bytes);
+    int32_t* samples[BATCHES] = { 0 };
+
+    for (int i = 0; i < BATCHES; i++) {
+        samples[i] = malloc(SAMPLES * mic.opts.bytes);
+    }
 
     while (true) {
-        PROFILE(i2s_buffer(&mic, buffer, sizeof(buffer) / sizeof(*buffer)));
+        printf("free %.02fkB\n", heap_caps_get_free_size(MALLOC_CAP_DEFAULT) / 1024.0f);
+
+        for (int i = 0; i < BATCHES; i++) {
+            PROFILE("buffer read", {
+                i2s_buffer(&mic, buffer, SAMPLES * 2);
+            });
+
+            PROFILE("store channel", {
+                for (int n = 0; n < SAMPLES; n++) {
+                    samples[i][n] = buffer[n * 2];
+                }
+            });
+        }
+
+        PROFILE("log to serial", {
+            for (int i = 0; i < BATCHES; i++) {
+                fwrite(samples[i], SAMPLES, mic.opts.bytes, stdout);
+            }
+        });
+
+        vTaskDelay(pdMS_TO_TICKS(500));
     }
 }
