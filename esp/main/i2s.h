@@ -33,4 +33,4 @@ typedef struct i2s_t {
 i2s_t i2s_init(uint32_t sample_rate, i2s_opts_t opts, i2s_pins_t pins);
 
 void i2s_buffer(i2s_t* i2s, void* buffer, int len);
-uint32_t* i2s_read(i2s_t* i2s, int samples);
+void* i2s_read(i2s_t* i2s, int samples);

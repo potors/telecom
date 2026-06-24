@@ -66,10 +66,10 @@ void i2s_buffer(i2s_t* i2s, void* buffer, int samples) {
     ESP_ERROR_CHECK(i2s_channel_read(i2s->rx, buffer, len, NULL, portMAX_DELAY));
 }
 
-uint32_t* i2s_read(i2s_t* i2s, int samples) {
+void* i2s_read(i2s_t* i2s, int samples) {
     int len = samples * i2s->opts.bytes;
 
-    uint32_t* buffer = malloc(len);
+    void* buffer = malloc(len);
     i2s_buffer(i2s, buffer, samples);
 
     return buffer;
