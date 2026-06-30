@@ -1,10 +1,7 @@
 #include <stdio.h>
-#include <math.h>
+#include <unistd.h>
 #include <esp_log.h>
-#include <esp_err.h>
 #include <esp_timer.h>
-#include <esp_random.h>
-#include <esp_task_wdt.h>
 #include <esp_heap_caps.h>
 #include <freertos/FreeRTOS.h>
 
@@ -48,6 +45,7 @@
 
 #define SAMPLE_RATE (48000 * 2)
 #define SAMPLES (1024 * 4)
+#define BATCHES 12
 
 void app_main() {
     lcd_t lcd = lcd_init(320, 240, (lcd_opts_t) {
@@ -74,7 +72,6 @@ void app_main() {
         .sck = MIC1_SCK,
     });
 
-    #define BATCHES 12
     int32_t* buffer = malloc(SAMPLES * 2 * mic.opts.bytes);
     int32_t* samples[BATCHES] = { 0 };
 
@@ -97,12 +94,25 @@ void app_main() {
             });
         }
 
+        uint16_t data[] = { SAMPLES, mic.opts.bytes };
+        uint8_t event[] = { 0xED, 0x80 + (sizeof(data) / sizeof(*data)) };
+
         PROFILE("log to serial", {
             for (int i = 0; i < BATCHES; i++) {
-                fwrite(samples[i], SAMPLES, mic.opts.bytes, stdout);
+                fwrite(event, sizeof(*event), sizeof(event) / sizeof(*event), stdout);
+                fwrite(data, sizeof(*data), sizeof(data) / sizeof(*data), stdout);
+                fwrite(samples[i], mic.opts.bytes, SAMPLES, stdout);
+
+                // TODO: wait for response to not
+                //       output unnecesssary garbage
+
+                fflush(stdout);
+                fsync(fileno(stdout));
+
+                vTaskDelay(1);
             }
         });
 
-        vTaskDelay(pdMS_TO_TICKS(500));
+        vTaskDelay(1);
     }
 }
