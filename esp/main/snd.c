@@ -5,6 +5,8 @@
 #include <freertos/FreeRTOS.h>
 
 #define TAG "snd"
+#define MIN(a, b) ((a) < (b) ? (a) : (b))
+#define MAX(a, b) ((a) > (b) ? (a) : (b))
 
 // TODO: padronize logging infra
 #define TRACE(MSG, ...) ESP_LOGD(TAG, "(%s) " MSG, __func__, __VA_ARGS__)
@@ -30,6 +32,7 @@ float snd_dot_product(float* a, float* b, int len) {
     return dot;
 }
 
+// TODO: check float operations time length
 match_t snd_matched_filter(float* a, float* b, int samples, int sample_rate) {
     TRACE("matching two signals (%d samples each) at %dHz", samples, sample_rate);
     float best_corr = 0.0f;

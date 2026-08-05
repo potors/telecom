@@ -7,11 +7,14 @@
 #include <esp_heap_caps.h>
 #include <freertos/FreeRTOS.h>
 
+#include "freertos/projdefs.h"
 #include "i2s.h"
 #include "lcd.h"
 #include "snd.h"
 
 #define TAG "main"
+#define MIN(a, b) ((a) < (b) ? (a) : (b))
+#define MAX(a, b) ((a) > (b) ? (a) : (b))
 
 // TODO: make an compile-time stack based profiler
 #define PROFILE(MSG, CALL) do { \
@@ -21,36 +24,19 @@
         (esp_timer_get_time() - start) / 1000.0f); \
 } while (false)
 
-#if defined CONFIG_IDF_TARGET_ESP32
-    #define MIC1_WS GPIO_NUM_4
-    #define MIC1_SD GPIO_NUM_2
-    #define MIC1_SCK "todo"
-#endif
+#define MIC1_SD GPIO_NUM_21
+#define MIC1_WS GPIO_NUM_22
+#define MIC1_SCK GPIO_NUM_23
 
-#if defined CONFIG_IDF_TARGET_ESP32C3 /*
-              .  5 -|----|||----|- 5V .
-     LCD_MOSI .  6 -|    |||    |- 0V . in
-              .  7 -|  -o- -o-  |- 3V . out
-              .  8 -|    /^\    |- 4  .
-      LCD_SCK .  9 -|   /   \   |- 3  .
-       LCD_DC . 10 -|   \   /   |- 2  . MIC_SCK
-    LCD_RESET . 20 -| =  \v/    |- 1  . MIC_WS
-       LCD_CS . 21 -|----===----|- 0  . MIC_SD */
+#define MIC2_SD GPIO_NUM_1
+#define MIC2_WS GPIO_NUM_0
+#define MIC2_SCK GPIO_NUM_3
 
-    // #define MIC1_SD GPIO_NUM_0
-    // #define MIC1_WS GPIO_NUM_1
-    // #define MIC1_SCK GPIO_NUM_2
-
-    #define MIC1_SD GPIO_NUM_1
-    #define MIC1_WS GPIO_NUM_0
-    #define MIC1_SCK GPIO_NUM_3
-
-    // #define LCD_SCK GPIO_NUM_9
-    // #define LCD_MOSI GPIO_NUM_6
-    // #define LCD_DC GPIO_NUM_10
-    // #define LCD_RESET GPIO_NUM_20
-    // #define LCD_CS GPIO_NUM_21
-#endif
+#define LCD_SCK GPIO_NUM_9
+#define LCD_MOSI GPIO_NUM_6
+#define LCD_DC GPIO_NUM_10
+#define LCD_RESET GPIO_NUM_20
+#define LCD_CS GPIO_NUM_21
 
 #define SAMPLE_RATE (48000 * 1)
 #define SAMPLES (2 * 64 * 3)
@@ -68,11 +54,11 @@ void app_main() {
     //
     // lcd_fill(&lcd, LCD_BLACK);
 
-    i2s_t mic = i2s_init(0, SAMPLE_RATE, (i2s_opts_t) {
+    i2s_t mic1 = i2s_init(0, SAMPLE_RATE, (i2s_opts_t) {
         .bits = 24,
-        .bytes = sizeof(uint32_t),
-        .sides = I2S_BOTH,
-        .stereo = true,
+        .bytes = sizeof(int32_t),
+        .sides = I2S_LEFT,
+        .stereo = false,
         .shift = true,
         .slave = false,
     }, (i2s_pins_t) {
@@ -82,24 +68,14 @@ void app_main() {
     });
 
     while (true) {
-        // ESP_LOGE(TAG, "free %.02fkB", heap_caps_get_free_size(MALLOC_CAP_DEFAULT) / 1024.0f);
+        ESP_LOGE(TAG, "free %.02fkB", heap_caps_get_free_size(MALLOC_CAP_DEFAULT) / 1024.0f);
 
         ESP_LOGW(TAG, "reading %d samples", SAMPLES);
-        i2s_buffer* buffer = i2s_read(&mic, SAMPLES);
+        i2s_buffer* buffer = i2s_read(&mic1, SAMPLES);
         if (!buffer) {
             vTaskDelay(1);
             continue;
         }
-
-        // printf("left\n");
-        // for (int i = 0; i < buffer->samples; i++) {
-        //     printf("%f ", buffer->left[i]);
-        // } printf("\n");
-
-        // printf("right\n");
-        // for (int i = 0; i < buffer->samples; i++) {
-        //     printf("%f ", (buffer->right[i]));
-        // } printf("\n");
 
         float lmin = snd_min(buffer->left, buffer->samples);
         float lmax = snd_max(buffer->left, buffer->samples);
@@ -146,18 +122,20 @@ void app_main() {
                 ESP_LOGI(TAG, "match left:  min/max=%.06f/%.06f rms=%.0f freq=%.0fHz", mlmin, mlmax, mlrms * 0x800000, mlfreq);
                 ESP_LOGI(TAG, "match right: min/max=%.06f/%.06f rms=%.0f freq=%.0fHz", mrmin, mrmax, mrrms * 0x800000, mrfreq);
             }
+        } else {
+            vTaskDelay(pdMS_TO_TICKS(800));
         }
 
         i2s_free(buffer);
 
         // TODO: make a header only for protocol communication
-        // uint16_t data[] = { SAMPLES, mic.opts.bytes };
+        // uint16_t data[] = { SAMPLES, mic1.opts.bytes };
         // uint8_t event[] = { 0xED, 0x80 + (sizeof(data) / sizeof(*data)) };
         //
         // PROFILE("log to serial", {
         //     fwrite(event, sizeof(*event), sizeof(event) / sizeof(*event), stdout);
         //     fwrite(data, sizeof(*data), sizeof(data) / sizeof(*data), stdout);
-        //     fwrite(samples[i], mic.opts.bytes, SAMPLES, stdout);
+        //     fwrite(samples[i], mic1.opts.bytes, SAMPLES, stdout);
         //
         //     // TODO: wait for response to not
         //     //       output unnecesssary garbage
