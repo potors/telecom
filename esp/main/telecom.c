@@ -16,7 +16,7 @@
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
 
-// TODO: make an compile-time stack based profiler
+// TODO: make a compile-time stack based profiler
 #define PROFILE(MSG, CALL) do { \
     uint64_t start = esp_timer_get_time(); \
     CALL; \
@@ -24,19 +24,18 @@
         (esp_timer_get_time() - start) / 1000.0f); \
 } while (false)
 
+#define MIC_SCK GPIO_NUM_22
 #define MIC1_SD GPIO_NUM_21
-#define MIC1_WS GPIO_NUM_22
-#define MIC1_SCK GPIO_NUM_23
+#define MIC1_WS GPIO_NUM_19
+#define MIC2_SD GPIO_NUM_18
+#define MIC2_WS GPIO_NUM_5
 
-#define MIC2_SD GPIO_NUM_1
-#define MIC2_WS GPIO_NUM_0
-#define MIC2_SCK GPIO_NUM_3
-
-#define LCD_SCK GPIO_NUM_9
-#define LCD_MOSI GPIO_NUM_6
-#define LCD_DC GPIO_NUM_10
-#define LCD_RESET GPIO_NUM_20
-#define LCD_CS GPIO_NUM_21
+//TODO: builtin map visualization
+#define LCD_SCK GPIO_NUM_1
+#define LCD_MOSI GPIO_NUM_1
+#define LCD_DC GPIO_NUM_1
+#define LCD_RESET GPIO_NUM_1
+#define LCD_CS GPIO_NUM_1
 
 #define SAMPLE_RATE (48000 * 1)
 #define SAMPLES (2 * 64 * 3)
@@ -57,14 +56,28 @@ void app_main() {
     i2s_t mic1 = i2s_init(0, SAMPLE_RATE, (i2s_opts_t) {
         .bits = 24,
         .bytes = sizeof(int32_t),
-        .sides = I2S_LEFT,
-        .stereo = false,
+        .sides = I2S_BOTH,
+        .stereo = true,
         .shift = true,
         .slave = false,
     }, (i2s_pins_t) {
         .ws = MIC1_WS,
         .sd = MIC1_SD,
-        .sck = MIC1_SCK,
+        .sck = MIC_SCK,
+    });
+
+    // second channel should be slave to sync the inputs.
+    i2s_t mic2 = i2s_init(1, SAMPLE_RATE, (i2s_opts_t) {
+        .bits = 24,
+        .bytes = sizeof(int32_t),
+        .sides = I2S_LEFT,
+        .stereo = false,
+        .shift = true,
+        .slave = true,
+    }, (i2s_pins_t) {
+        .ws = MIC2_WS,
+        .sd = MIC2_SD,
+        .sck = MIC_SCK,
     });
 
     while (true) {
@@ -77,6 +90,9 @@ void app_main() {
             continue;
         }
 
+        // The time wasted on these is insignificant
+        //   compared to the matched filter, so there's
+        //   no need to remove them (good for debugging).
         float lmin = snd_min(buffer->left, buffer->samples);
         float lmax = snd_max(buffer->left, buffer->samples);
         float lrms = snd_rms(buffer->left, buffer->samples);
@@ -125,6 +141,8 @@ void app_main() {
         } else {
             vTaskDelay(pdMS_TO_TICKS(800));
         }
+
+        // TODO: run the triangulation algorithm hosted on arcjth/tloc2
 
         i2s_free(buffer);
 

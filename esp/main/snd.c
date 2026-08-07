@@ -1,8 +1,10 @@
 #include "snd.h"
-#include <stdio.h>
 #include <math.h>
 #include <esp_log.h>
 #include <freertos/FreeRTOS.h>
+
+//FIXME: rollback every float operation to integer ones
+//       to reduce by (at least) half of the execution cycles.
 
 #define TAG "snd"
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
@@ -11,6 +13,8 @@
 // TODO: padronize logging infra
 #define TRACE(MSG, ...) ESP_LOGD(TAG, "(%s) " MSG, __func__, __VA_ARGS__)
 
+// TODO: take a look on espressif/esp-dsp
+//       it has optimized algorithms for this kind of stuff
 float snd_dot_product(float* a, float* b, int len) {
     TRACE("calculating dot product between two vector of %d elements", len);
     float dot = 0.0f;

@@ -3,7 +3,6 @@
 
 // TODO: fix this file to allow both versions of i2s_std
 //       to work together:
-//       
 //          - esp32 sends padded bytes
 //          - any other sends packed bytes
 //          - theres also a slot_cfg field conflicts
