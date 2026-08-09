@@ -152,17 +152,17 @@ i2s_buffer* i2s_read(i2s_t* i2s, int samples) {
         return NULL;
     }
 
-    #if CONFIG_LOG_DEFAULT_LEVEL_INFO >= ESP_LOG_DEBUG
-        printf("first samples:\n");
-        for (int i = 0; i < MIN(samples, 10 * sizeof(int32_t)); i += sizeof(int32_t)) {
-            uint8_t a = buffer[i + 0];
-            uint8_t b = buffer[i + 1];
-            uint8_t c = buffer[i + 2];
-            uint8_t d = buffer[i + 3];
-
-            printf("sample %d: %02x %02x %02x %02x\n", i, a, b, c, d);
-        }
-    #endif
+    // #if CONFIG_LOG_DEFAULT_LEVEL_INFO >= ESP_LOG_DEBUG
+    //     printf("first samples:\n");
+    //     for (int i = 0; i < MIN(samples, 10 * sizeof(int32_t)); i += sizeof(int32_t)) {
+    //         uint8_t a = buffer[i + 0];
+    //         uint8_t b = buffer[i + 1];
+    //         uint8_t c = buffer[i + 2];
+    //         uint8_t d = buffer[i + 3];
+    //
+    //         printf("sample %d: %02x %02x %02x %02x\n", i, a, b, c, d);
+    //     }
+    // #endif
 
     float* left = malloc(samples * sizeof(*left) * channels);
     float* right = channels == 2 ? &left[samples] : NULL;

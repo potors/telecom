@@ -2,9 +2,7 @@
 #include <math.h>
 #include <esp_log.h>
 #include <freertos/FreeRTOS.h>
-
-//FIXME: rollback every float operation to integer ones
-//       to reduce by (at least) half of the execution cycles.
+#include <dsps_ccorr.h>
 
 #define TAG "snd"
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
@@ -13,57 +11,34 @@
 // TODO: padronize logging infra
 #define TRACE(MSG, ...) ESP_LOGD(TAG, "(%s) " MSG, __func__, __VA_ARGS__)
 
-// TODO: take a look on espressif/esp-dsp
-//       it has optimized algorithms for this kind of stuff
-float snd_dot_product(float* a, float* b, int len) {
-    TRACE("calculating dot product between two vector of %d elements", len);
-    float dot = 0.0f;
-    float A = 0.0f;
-    float B = 0.0f;
+match_t snd_matched_filter(float* a, float* b, int samples) {
+    int len = samples * 2 - 1;
+    float* v = malloc(sizeof(*v) * len);
+    dsps_ccorr_f32_ae32(b, samples, a, samples, v);
 
+    float lag = 0;
+    float corr = -1;
     for (int i = 0; i < len; i++) {
-        dot += a[i] * b[i];
+        float x = v[i];
+        if (x > corr) {
+            lag = i - (samples - 1);
+            corr = x;
+        }
+    }
 
+    free(v);
+
+    float A = 0;
+    float B = 0;
+    for (int i = 0; i < samples; i++) {
         A += a[i] * a[i];
         B += b[i] * b[i];
     }
 
-    dot /= sqrtf(A * B);
+    corr /= sqrtf(A * B);
 
-    TRACE("vector [a] magnitude: %f", A);
-    TRACE("vector [b] magnitude: %f", B);
-    TRACE("got %f", dot);
-    return dot;
-}
-
-// TODO: check float operations time length
-match_t snd_matched_filter(float* a, float* b, int samples, int sample_rate) {
-    TRACE("matching two signals (%d samples each) at %dHz", samples, sample_rate);
-    float best_corr = 0.0f;
-    int best_lag = 0;
-
-    #define SKIPS 1
-    #define DIVISOR 4
-
-    for (int lag = -samples / DIVISOR; lag < samples / DIVISOR; lag += SKIPS) {
-        float corr = snd_dot_product(
-            &a[MAX(lag, 0)],
-            &b[MIN(lag, 0)],
-            samples - abs(lag) * 2);
-
-        if (corr > best_corr) {
-            best_corr = corr;
-            best_lag = lag;
-        }
-
-        vTaskDelay(1);
-    }
-
-    TRACE("best lag: %d, best corr: %d", best_lag, best_corr);
-    return (match_t) {
-        .lag = best_lag,
-        .corr = best_corr,
-    };
+    TRACE("lag: %f, corr: %f", lag, corr);
+    return (match_t) { lag, corr };
 }
 
 float snd_zero_crossings(float* buffer, int samples, int sample_rate) {
@@ -120,5 +95,3 @@ float snd_max(float* buffer, int samples) {
     TRACE("got max of %f", max);
     return max;
 }
-
-

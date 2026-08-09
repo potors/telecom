@@ -17,12 +17,11 @@
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
 
 // TODO: make a compile-time stack based profiler
-#define PROFILE(MSG, CALL) do { \
-    uint64_t start = esp_timer_get_time(); \
-    CALL; \
-    ESP_LOGI("profiler", "%s [ln. %d] took %.03fms", MSG, __LINE__, \
-        (esp_timer_get_time() - start) / 1000.0f); \
-} while (false)
+#define PROFILE(MSG, CALL) ({ \
+    uint64_t start = esp_timer_get_time(); CALL; \
+    float took = (esp_timer_get_time() - start) / 1000.0f; \
+    ESP_LOGI("profiler", "%s [ln. %d] took %.03fms", MSG, __LINE__, took); \
+})
 
 #define MIC_SCK GPIO_NUM_22
 #define MIC1_SD GPIO_NUM_21
@@ -37,8 +36,8 @@
 #define LCD_RESET GPIO_NUM_1
 #define LCD_CS GPIO_NUM_1
 
-#define SAMPLE_RATE (48000 * 1)
-#define SAMPLES (2 * 64 * 3)
+#define SAMPLE_RATE (48000 * 2)
+#define SAMPLES (256)
 
 void app_main() {
     // lcd_t lcd = lcd_init(320, 240, (lcd_opts_t) {
@@ -93,10 +92,17 @@ void app_main() {
         // The time wasted on these is insignificant
         //   compared to the matched filter, so there's
         //   no need to remove them (good for debugging).
-        float lmin = snd_min(buffer->left, buffer->samples);
-        float lmax = snd_max(buffer->left, buffer->samples);
-        float lrms = snd_rms(buffer->left, buffer->samples);
-        float lfreq = snd_zero_crossings(buffer->left, buffer->samples, SAMPLE_RATE);
+        float lmin = 0.0f;
+        float lmax = 0.0f;
+        float lrms = 0.0f;
+        float lfreq = 0.0f;
+
+        PROFILE("left side", {
+            lmin = snd_min(buffer->left, buffer->samples);
+            lmax = snd_max(buffer->left, buffer->samples);
+            lrms = snd_rms(buffer->left, buffer->samples);
+            lfreq = snd_zero_crossings(buffer->left, buffer->samples, SAMPLE_RATE);
+        });
 
         float rmin = 0.0f;
         float rmax = 0.0f;
@@ -110,22 +116,30 @@ void app_main() {
         float mlfreq = 0.0f, mrfreq = 0.0f;
 
         if (buffer->right) {
-            rmin = snd_min(buffer->right, buffer->samples);
-            rmax = snd_max(buffer->right, buffer->samples);
-            rrms = snd_rms(buffer->right, buffer->samples);
-            rfreq = snd_zero_crossings(buffer->right, buffer->samples, SAMPLE_RATE);
+            PROFILE("right side", {
+                rmin = snd_min(buffer->right, buffer->samples);
+                rmax = snd_max(buffer->right, buffer->samples);
+                rrms = snd_rms(buffer->right, buffer->samples);
+                rfreq = snd_zero_crossings(buffer->right, buffer->samples, SAMPLE_RATE);
+            });
 
-            match = snd_matched_filter(buffer->left, buffer->right, buffer->samples, SAMPLE_RATE);
+            PROFILE("matched filter", {
+                match = snd_matched_filter(buffer->left, buffer->right, buffer->samples);
+            });
 
-            mlmin = snd_min(&buffer->left[MAX(match.lag, 0)], buffer->samples - MAX(match.lag, 0));
-            mlmax = snd_max(&buffer->left[MAX(match.lag, 0)], buffer->samples - MAX(match.lag, 0));
-            mlrms = snd_rms(&buffer->left[MAX(match.lag, 0)], buffer->samples - MAX(match.lag, 0));
-            mlfreq = snd_zero_crossings(&buffer->left[MAX(match.lag, 0)], buffer->samples - MAX(match.lag, 0), SAMPLE_RATE);
+            PROFILE("left match", {
+                mlmin = snd_min(&buffer->left[MAX(match.lag, 0)], buffer->samples - MAX(match.lag, 0));
+                mlmax = snd_max(&buffer->left[MAX(match.lag, 0)], buffer->samples - MAX(match.lag, 0));
+                mlrms = snd_rms(&buffer->left[MAX(match.lag, 0)], buffer->samples - MAX(match.lag, 0));
+                mlfreq = snd_zero_crossings(&buffer->left[MAX(match.lag, 0)], buffer->samples - MAX(match.lag, 0), SAMPLE_RATE);
+            });
 
-            mrmin = snd_min(&buffer->right[MIN(match.lag, 0)], buffer->samples - MIN(match.lag, 0));
-            mrmax = snd_max(&buffer->right[MIN(match.lag, 0)], buffer->samples - MIN(match.lag, 0));
-            mrrms = snd_rms(&buffer->right[MIN(match.lag, 0)], buffer->samples - MIN(match.lag, 0));
-            mrfreq = snd_zero_crossings(&buffer->right[MIN(match.lag, 0)], buffer->samples - MIN(match.lag, 0), SAMPLE_RATE);
+            PROFILE("right match", {
+                mrmin = snd_min(&buffer->right[MIN(match.lag, 0)], buffer->samples - MIN(match.lag, 0));
+                mrmax = snd_max(&buffer->right[MIN(match.lag, 0)], buffer->samples - MIN(match.lag, 0));
+                mrrms = snd_rms(&buffer->right[MIN(match.lag, 0)], buffer->samples - MIN(match.lag, 0));
+                mrfreq = snd_zero_crossings(&buffer->right[MIN(match.lag, 0)], buffer->samples - MIN(match.lag, 0), SAMPLE_RATE);
+            });
         }
 
         ESP_LOGI(TAG, "left:  min/max=%.06f/%.06f rms=%.0f freq=%.0fHz", lmin, lmax, lrms * 0x800000, lfreq);
@@ -133,7 +147,7 @@ void app_main() {
             ESP_LOGI(TAG, "right: min/max=%.06f/%.06f rms=%.0f freq=%.0fHz", rmin, rmax, rrms * 0x800000, rfreq);
 
             if (match.corr != 0.0f) {
-                ESP_LOGW(TAG, "match: %.0f%% (offsetted by %d samples / %.02fµs)", match.corr * 100, match.lag, 1.0f / SAMPLE_RATE * match.lag * 1000 * 1000);
+                ESP_LOGW(TAG, "match: %.0f%% (offsetted by %d samples / %.03fms)", match.corr * 100, match.lag, 1.0f / SAMPLE_RATE * match.lag * 1000);
 
                 ESP_LOGI(TAG, "match left:  min/max=%.06f/%.06f rms=%.0f freq=%.0fHz", mlmin, mlmax, mlrms * 0x800000, mlfreq);
                 ESP_LOGI(TAG, "match right: min/max=%.06f/%.06f rms=%.0f freq=%.0fHz", mrmin, mrmax, mrrms * 0x800000, mrfreq);
