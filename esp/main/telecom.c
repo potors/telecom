@@ -1,7 +1,3 @@
-#include <stdio.h>
-#include <unistd.h>
-#include <math.h>
-#include <inttypes.h>
 #include <esp_log.h>
 #include <esp_timer.h>
 #include <esp_heap_caps.h>
@@ -24,10 +20,9 @@
 })
 
 #define MIC_SCK GPIO_NUM_22
+#define MIC_WS GPIO_NUM_19
 #define MIC1_SD GPIO_NUM_21
-#define MIC1_WS GPIO_NUM_19
 #define MIC2_SD GPIO_NUM_18
-#define MIC2_WS GPIO_NUM_5
 
 //TODO: builtin map visualization
 #define LCD_SCK GPIO_NUM_1
@@ -36,8 +31,8 @@
 #define LCD_RESET GPIO_NUM_1
 #define LCD_CS GPIO_NUM_1
 
-#define SAMPLE_RATE (48000 * 2)
-#define SAMPLES (256)
+#define SAMPLE_RATE 48000
+#define SAMPLES 128
 
 void app_main() {
     // lcd_t lcd = lcd_init(320, 240, (lcd_opts_t) {
@@ -53,112 +48,84 @@ void app_main() {
     // lcd_fill(&lcd, LCD_BLACK);
 
     i2s_t mic1 = i2s_init(0, SAMPLE_RATE, (i2s_opts_t) {
-        .bits = 24,
-        .bytes = sizeof(int32_t),
-        .sides = I2S_BOTH,
+        .data = 24,
+        .slot = 32,
         .stereo = true,
         .shift = true,
         .slave = false,
     }, (i2s_pins_t) {
-        .ws = MIC1_WS,
+        .ws = MIC_WS,
         .sd = MIC1_SD,
         .sck = MIC_SCK,
     });
 
     // second channel should be slave to sync the inputs.
     i2s_t mic2 = i2s_init(1, SAMPLE_RATE, (i2s_opts_t) {
-        .bits = 24,
-        .bytes = sizeof(int32_t),
-        .sides = I2S_LEFT,
+        .data = 24,
+        .slot = 32,
         .stereo = false,
         .shift = true,
         .slave = true,
     }, (i2s_pins_t) {
-        .ws = MIC2_WS,
+        .ws = MIC_WS,
         .sd = MIC2_SD,
         .sck = MIC_SCK,
     });
 
+    {
+        char buffer[SAMPLES];
+        i2s_channel_read(mic1.rx, buffer, sizeof(buffer), NULL, pdMS_TO_TICKS(100));
+        i2s_channel_read(mic2.rx, buffer, sizeof(buffer), NULL, pdMS_TO_TICKS(100));
+    }
+
     while (true) {
         ESP_LOGE(TAG, "free %.02fkB", heap_caps_get_free_size(MALLOC_CAP_DEFAULT) / 1024.0f);
 
-        ESP_LOGW(TAG, "reading %d samples", SAMPLES);
-        i2s_buffer* buffer = i2s_read(&mic1, SAMPLES);
-        if (!buffer) {
-            vTaskDelay(1);
-            continue;
-        }
+        void* buffer1 = i2s_read(&mic1, SAMPLES);
+        void* buffer2 = i2s_read(&mic2, SAMPLES);
 
-        // The time wasted on these is insignificant
-        //   compared to the matched filter, so there's
-        //   no need to remove them (good for debugging).
-        float lmin = 0.0f;
-        float lmax = 0.0f;
-        float lrms = 0.0f;
-        float lfreq = 0.0f;
+        i2s_data_t data1 = i2s_parse(&mic1, buffer1, SAMPLES);
+        i2s_data_t data2 = i2s_parse(&mic2, buffer2, SAMPLES);
 
-        PROFILE("left side", {
-            lmin = snd_min(buffer->left, buffer->samples);
-            lmax = snd_max(buffer->left, buffer->samples);
-            lrms = snd_rms(buffer->left, buffer->samples);
-            lfreq = snd_zero_crossings(buffer->left, buffer->samples, SAMPLE_RATE);
-        });
+        free(buffer1);
+        free(buffer2);
 
-        float rmin = 0.0f;
-        float rmax = 0.0f;
-        float rrms = 0.0f;
-        float rfreq = 0.0f;
+        float* a = data1.l;
+        float* b = data1.r;
+        float* c = data2.l;
 
-        match_t match = { 0 };
-        float mlmin = 0.0f, mrmin = 0.0f;
-        float mlmax = 0.0f, mrmax = 0.0f;
-        float mlrms = 0.0f, mrrms = 0.0f;
-        float mlfreq = 0.0f, mrfreq = 0.0f;
+        ESP_LOGI(TAG, "mic(a): min/max=%.06f/%.06f rms=%.0f freq=%.0fHz",
+            snd_min(a, SAMPLES), snd_max(a, SAMPLES),
+            snd_rms(a, SAMPLES) * 0xFFFFFF,
+            snd_zero_crossings(a, SAMPLES) * SAMPLE_RATE);
 
-        if (buffer->right) {
-            PROFILE("right side", {
-                rmin = snd_min(buffer->right, buffer->samples);
-                rmax = snd_max(buffer->right, buffer->samples);
-                rrms = snd_rms(buffer->right, buffer->samples);
-                rfreq = snd_zero_crossings(buffer->right, buffer->samples, SAMPLE_RATE);
-            });
+        ESP_LOGI(TAG, "mic(b): min/max=%.06f/%.06f rms=%.0f freq=%.0fHz",
+            snd_min(b, SAMPLES), snd_max(b, SAMPLES),
+            snd_rms(b, SAMPLES) * 0xFFFFFF,
+            snd_zero_crossings(b, SAMPLES) * SAMPLE_RATE);
 
-            PROFILE("matched filter", {
-                match = snd_matched_filter(buffer->left, buffer->right, buffer->samples);
-            });
+        ESP_LOGI(TAG, "mic(c): min/max=%.06f/%.06f rms=%.0f freq=%.0fHz",
+            snd_min(c, SAMPLES), snd_max(c, SAMPLES),
+            snd_rms(c, SAMPLES) * 0xFFFFFF,
+            snd_zero_crossings(c, SAMPLES) * SAMPLE_RATE);
 
-            PROFILE("left match", {
-                mlmin = snd_min(&buffer->left[MAX(match.lag, 0)], buffer->samples - MAX(match.lag, 0));
-                mlmax = snd_max(&buffer->left[MAX(match.lag, 0)], buffer->samples - MAX(match.lag, 0));
-                mlrms = snd_rms(&buffer->left[MAX(match.lag, 0)], buffer->samples - MAX(match.lag, 0));
-                mlfreq = snd_zero_crossings(&buffer->left[MAX(match.lag, 0)], buffer->samples - MAX(match.lag, 0), SAMPLE_RATE);
-            });
 
-            PROFILE("right match", {
-                mrmin = snd_min(&buffer->right[MIN(match.lag, 0)], buffer->samples - MIN(match.lag, 0));
-                mrmax = snd_max(&buffer->right[MIN(match.lag, 0)], buffer->samples - MIN(match.lag, 0));
-                mrrms = snd_rms(&buffer->right[MIN(match.lag, 0)], buffer->samples - MIN(match.lag, 0));
-                mrfreq = snd_zero_crossings(&buffer->right[MIN(match.lag, 0)], buffer->samples - MIN(match.lag, 0), SAMPLE_RATE);
-            });
-        }
+        match_t ab, ac, bc;
 
-        ESP_LOGI(TAG, "left:  min/max=%.06f/%.06f rms=%.0f freq=%.0fHz", lmin, lmax, lrms * 0x800000, lfreq);
-        if (buffer->right) {
-            ESP_LOGI(TAG, "right: min/max=%.06f/%.06f rms=%.0f freq=%.0fHz", rmin, rmax, rrms * 0x800000, rfreq);
+        PROFILE("ab matching", ab = snd_matched_filter(a, b, SAMPLES));
+        PROFILE("ac matching", ac = snd_matched_filter(a, c, SAMPLES));
+        PROFILE("bc matching", bc = snd_matched_filter(b, c, SAMPLES));
 
-            if (match.corr != 0.0f) {
-                ESP_LOGW(TAG, "match: %.0f%% (offsetted by %d samples / %.03fms)", match.corr * 100, match.lag, 1.0f / SAMPLE_RATE * match.lag * 1000);
+        ESP_LOGW(TAG, "ab match: %.0f%% (lag of %d samples - %.03fms)", ab.corr * 100, ab.lag, 1.0f / SAMPLE_RATE * ab.lag * 1000);
+        ESP_LOGW(TAG, "ac match: %.0f%% (lag of %d samples - %.03fms)", ac.corr * 100, ac.lag, 1.0f / SAMPLE_RATE * ac.lag * 1000);
+        ESP_LOGW(TAG, "bc match: %.0f%% (lag of %d samples - %.03fms)", bc.corr * 100, bc.lag, 1.0f / SAMPLE_RATE * bc.lag * 1000);
 
-                ESP_LOGI(TAG, "match left:  min/max=%.06f/%.06f rms=%.0f freq=%.0fHz", mlmin, mlmax, mlrms * 0x800000, mlfreq);
-                ESP_LOGI(TAG, "match right: min/max=%.06f/%.06f rms=%.0f freq=%.0fHz", mrmin, mrmax, mrrms * 0x800000, mrfreq);
-            }
-        } else {
-            vTaskDelay(pdMS_TO_TICKS(800));
-        }
+        free(a);
+        free(b);
+        free(c);
+
 
         // TODO: run the triangulation algorithm hosted on arcjth/tloc2
-
-        i2s_free(buffer);
 
         // TODO: make a header only for protocol communication
         // uint16_t data[] = { SAMPLES, mic1.opts.bytes };
@@ -179,6 +146,6 @@ void app_main() {
         // });
 
         // printf("\x1b[3A");
-        vTaskDelay(1);
+        vTaskDelay(pdMS_TO_TICKS(200));
     }
 }

@@ -1,7 +1,6 @@
 #include "snd.h"
 #include <math.h>
 #include <esp_log.h>
-#include <freertos/FreeRTOS.h>
 #include <dsps_ccorr.h>
 
 #define TAG "snd"
@@ -41,8 +40,8 @@ match_t snd_matched_filter(float* a, float* b, int samples) {
     return (match_t) { lag, corr };
 }
 
-float snd_zero_crossings(float* buffer, int samples, int sample_rate) {
-    TRACE("calculating frequency from %d samples at %dHz", samples, sample_rate);
+float snd_zero_crossings(float* buffer, int samples) {
+    TRACE("calculating frequency from %d samples", samples);
     int crossings = 0;
 
     for (int i = 1; i < samples; i++) {
@@ -52,7 +51,7 @@ float snd_zero_crossings(float* buffer, int samples, int sample_rate) {
         crossings += prev != curr;
     }
 
-    float freq = (crossings / 2.0f) / samples * sample_rate;
+    float freq = (crossings / 2.0f) / samples;
 
     TRACE("got %fHz", freq);
     return freq;
